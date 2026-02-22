@@ -1,0 +1,5 @@
+﻿__pycache__/
+downloads/*.mp4
+.env
+.streamlit/
+*.pyc

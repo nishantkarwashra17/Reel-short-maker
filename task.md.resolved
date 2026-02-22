@@ -1,0 +1,19 @@
+# Task: Reel Short Maker Implementation
+
+- [x] Project Initialization
+    - [x] Create task list
+    - [x] Set up implementation plan
+- [x] Research & Technology Selection
+    - [x] Identify best free AI models for transcription (Whisper)
+    - [x] Research face-tracking/automatic reframing libraries (MediaPipe/OpenCV)
+    - [x] Research captioning libraries (MoviePy/FFmpeg)
+- [x] Backend Development
+    - [x] YouTube Downloader (yt-dlp)
+    - [x] AI Transcription & Clip Analysis (LLM-based)
+    - [x] Video Processing Engine (Cropping & Captions)
+- [x] Frontend Development
+    - [x] Simple UI for URL input and clip preview
+- [x] Deployment Strategy
+    - [x] Guide for Hugging Face / Colab deployment
+- [x] Verification & Documentation
+    - [x] Create walkthrough

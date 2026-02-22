@@ -1,0 +1,27 @@
+# Walkthrough: AI Reel Short Maker
+
+I have successfully built a complete AI-powered pipeline to transform YouTube videos into high-engagement Reels/Shorts.
+
+## ✨ Features Implemented
+- **One-Click Conversion**: Just paste a URL and get viral clips.
+- **AI Viral Clipping**: Uses Gemini AI to intelligently pick the best moments.
+- **Dynamic 9:16 Reframing**: MediaPipe face-tracking keeps the speaker centered.
+- **Professional Captions**: Trending yellow/white font with drop shadows and black strokes.
+- **No Watermarks**: Native video processing using FFmpeg/MoviePy.
+
+## 🛠️ Technical Stack
+- **AI**: Gemini 1.5 Flash (Analysis), Faster-Whisper (Transcription).
+- **Video**: MoviePy, MediaPipe, OpenCV, yt-dlp.
+- **UI**: Streamlit.
+
+## 🎬 Final Product Structure
+All source files are available in the project directory:
+- [app.py](file:///c:/Users/gomti/reel%20short%20maker/app.py) - Main UI & Launcher
+- [video_engine.py](file:///c:/Users/gomti/reel%20short%20maker/video_engine.py) - Reframing & Captions logic
+- [analyzer.py](file:///c:/Users/gomti/reel%20short%20maker/analyzer.py) - Viral segment identification
+- [README.md](file:///c:/Users/gomti/reel%20short%20maker/README.md) - **Complete Setup & Cloud Deployment Guide**
+
+## 🚀 Verification
+- Verified `yt-dlp` fetches high-quality streams.
+- Face-tracking logic ensures the 9:16 crop window moves with the speaker.
+- Transcription includes word-level timestamps for precise caption sync.

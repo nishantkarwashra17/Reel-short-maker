@@ -1,0 +1,62 @@
+# Implementation Plan: AI Reel Short Maker
+
+This project aims to automate the creation of viral Reels and Shorts from YouTube videos by leveraging AI for clip selection, dynamic reframing (9:16), and professional captioning.
+
+## Proposed Architecture
+
+1. **Input Interface**: A simple web UI to take YouTube URLs.
+2. **Processing Pipeline**:
+   - **Download**: `yt-dlp` for high-quality video/audio extraction.
+   - **Transcription**: `faster-whisper` for timestamped transcripts.
+   - **Clipping AI**: LLM analysis to identify high-retention segments.
+   - **Dynamic Motion**: MediaPipe-based face tracking to center-crop the video to 9:16.
+   - **Captions Engine**: MoviePy/FFmpeg to render animated, colorful captions.
+3. **AI Logic (Algorithm Knowledge)**:
+   - **Hook Detection**: Focus on the first few sentences that create curiosity.
+   - **Retention Mapping**: Identify segments with high emotional density or key takeaways.
+   - **Format Optimization**: Structure clips to have a clear beginning, middle, and end.
+4. **Deployment**: Instructions for Hugging Face Spaces (Free Tier) with CPU/GPU support.
+
+## Proposed Changes
+
+### [Component] Backend Processing Logic
+
+#### [NEW] `downloader.py`
+Handles YouTube video and audio extraction using `yt-dlp`.
+
+#### [NEW] `transcriber.py`
+Uses `faster-whisper` to generate JSON with word-level timestamps.
+
+#### [NEW] `analyzer.py`
+Uses Gemini/GPT API to analyze transcripts for "viral" hooks and segments.
+**Prompting Strategy**:
+- "Identify the most engaging 30-60 second segments."
+- "Look for high-energy hooks and definitive conclusions."
+- "Ensure each clip is self-contained and follows the 1:10 rule (1 second hook for 10 seconds of value)."
+
+#### [NEW] `video_engine.py`
+- Core engine for dynamic reframing 16:9 -> 9:16.
+- **Dynamic Motion Algorithm**:
+  - Use `MediaPipe` to detect face coordinates in every frame.
+  - Apply a Kalman Filter or simple Moving Average to smooth the transition between speaker positions.
+  - Scale the 9:16 crop window to always keep the speaker's face in the upper-middle third (ideal for Reels).
+- **Captioning**:
+  - Render text word-by-word or phrase-by-phrase using `MoviePy`'s `TextClip`.
+  - Apply "trending" styles: Heavy font weight, drop shadow, and dynamic color highlighting for keywords.
+
+### [Component] Frontend
+
+#### [NEW] `app.py` (Streamlit or FastAPI/Vite)
+A simple dashboard to input links, view status, and download final clips.
+
+## Verification Plan
+
+### Automated Tests
+- Test `yt-dlp` integration with standard URLs.
+- Test `MediaPipe` tracking on sample talking-head videos.
+- Test caption rendering logic for various font sizes.
+
+### Manual Verification
+- Verify the 9:16 cropping follows the speaker accurately.
+- Ensure captions are readable and sync correctly with audio.
+- Check "viral" clip selection logic against manual intuition.

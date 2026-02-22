@@ -1,0 +1,9 @@
+﻿yt-dlp
+faster-whisper
+mediapipe
+moviepy==1.0.3
+streamlit
+opencv-python-headless
+python-dotenv
+google-generativeai
+numpy

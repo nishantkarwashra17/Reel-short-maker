@@ -1,0 +1,3 @@
+﻿[server]
+websocketMaxMessageSize = 2000
+enableWebsocketCompression = false
