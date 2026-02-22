@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from analyzer import analyze_transcript
+from analyzer import analyze_transcript, generate_social_pack
 from downloader import download_video
 from transcriber import transcribe_audio
 from video_engine import create_short
@@ -112,6 +112,11 @@ if st.button("Generate Viral Clips", use_container_width=True):
                 global_progress.progress(35, text="Clip selection complete")
                 st.write(f"Selected {len(viral_clips)} clips.")
 
+                st.write("Generating social content pack...")
+                social_pack = generate_social_pack(transcript, viral_clips)
+                completed_steps += 1
+                global_progress.progress(45, text="Social content pack ready")
+
                 all_words = []
                 for seg in transcript:
                     all_words.extend(seg.get("words", []))
@@ -119,7 +124,7 @@ if st.button("Generate Viral Clips", use_container_width=True):
                 os.makedirs("downloads", exist_ok=True)
                 processed_clips = []
 
-                total_steps = max(1, 3 + len(viral_clips))
+                total_steps = max(1, 4 + len(viral_clips))
                 for i, clip in enumerate(viral_clips, start=1):
                     hook_text = clip.get("hook", f"Clip {i}")
                     st.write(f"Rendering clip {i}: {hook_text}")
@@ -176,6 +181,37 @@ if st.button("Generate Viral Clips", use_container_width=True):
                                 key=f"dl_{i}",
                             )
                     st.divider()
+
+                st.header("AI Social Pack")
+                yt = social_pack.get("youtube_shorts", {})
+                ig = social_pack.get("instagram_reels", {})
+                ideas = social_pack.get("content_ideas", {})
+
+                st.subheader("YouTube Shorts")
+                st.text_area("Title", value=yt.get("title", ""), height=70)
+                st.text_area("Description", value=yt.get("description", ""), height=120)
+                st.code(" ".join(yt.get("hashtags", [])) or "#shorts #viral")
+
+                st.subheader("Instagram Reels")
+                st.text_area("Caption", value=ig.get("caption", ""), height=120)
+                st.code(" ".join(ig.get("hashtags", [])) or "#reels #viral")
+
+                st.subheader("Hook, CTA, Background and Music Ideas")
+                st.write("Hooks:")
+                for item in ideas.get("hook_options", []):
+                    st.write(f"- {item}")
+
+                st.write("CTA options:")
+                for item in ideas.get("cta_options", []):
+                    st.write(f"- {item}")
+
+                st.write("Background visual ideas:")
+                for item in ideas.get("background_visual_ideas", []):
+                    st.write(f"- {item}")
+
+                st.write("Music mood ideas:")
+                for item in ideas.get("music_mood_ideas", []):
+                    st.write(f"- {item}")
             else:
                 st.error("No clips were generated. Check warnings above.")
 
