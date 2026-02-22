@@ -1,4 +1,9 @@
-﻿import cv2
+﻿import os
+import re
+import subprocess
+import tempfile
+
+import cv2
 import numpy as np
 from moviepy.editor import CompositeVideoClip, TextClip, VideoFileClip
 
@@ -11,24 +16,24 @@ except Exception:
 def _get_render_params(render_profile):
     if render_profile == "quality":
         return {
-            "preset": "medium",
-            "bitrate": "8000k",
-            "crf": "20",
+            "preset": "slow",
+            "bitrate": "12000k",
+            "crf": "18",
             "sample_rate": 2.5,
             "threads": 4,
         }
     if render_profile == "balanced":
         return {
             "preset": "veryfast",
-            "bitrate": "6000k",
-            "crf": "22",
+            "bitrate": "9000k",
+            "crf": "20",
             "sample_rate": 1.8,
             "threads": 4,
         }
     return {
         "preset": "ultrafast",
-        "bitrate": "4200k",
-        "crf": "25",
+        "bitrate": "5200k",
+        "crf": "23",
         "sample_rate": 1.0,
         "threads": 2,
     }
@@ -40,7 +45,6 @@ def _notify(progress_callback, stage, pct):
 
 
 def _build_phrase_captions(words, group_size=3):
-    """Merge words into short phrases to reduce TextClip count and speed up rendering."""
     if not words:
         return []
 
@@ -65,6 +69,63 @@ def _build_phrase_captions(words, group_size=3):
     return merged
 
 
+def _to_srt_time(value):
+    total_ms = max(0, int(round(float(value) * 1000)))
+    hours = total_ms // 3600000
+    minutes = (total_ms % 3600000) // 60000
+    seconds = (total_ms % 60000) // 1000
+    millis = total_ms % 1000
+    return f"{hours:02}:{minutes:02}:{seconds:02},{millis:03}"
+
+
+def _sanitize_srt_text(text):
+    text = re.sub(r"\s+", " ", str(text)).strip()
+    return text.replace("-->", " ")
+
+
+def _write_srt(entries, srt_path):
+    with open(srt_path, "w", encoding="utf-8") as handle:
+        idx = 1
+        for item in entries:
+            start = float(item["start"])
+            end = float(item["end"])
+            if end - start <= 0.04:
+                continue
+            text = _sanitize_srt_text(item["word"])
+            if not text:
+                continue
+            handle.write(f"{idx}\n")
+            handle.write(f"{_to_srt_time(start)} --> {_to_srt_time(end)}\n")
+            handle.write(f"{text.upper()}\n\n")
+            idx += 1
+
+
+def _burn_subtitles_ffmpeg(video_input, video_output, srt_path, out_w):
+    font_size = 20 if out_w < 1000 else 28
+    style = (
+        f"Alignment=2,MarginV=120,PrimaryColour=&H00FFFF00,OutlineColour=&H00000000,"
+        f"BackColour=&H00000000,Bold=1,Outline=2,Shadow=1,FontSize={font_size}"
+    )
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        video_input,
+        "-vf",
+        f"subtitles={srt_path}:force_style='{style}'",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-c:a",
+        "copy",
+        video_output,
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def create_short(
     video_path,
     start_time,
@@ -76,7 +137,6 @@ def create_short(
     caption_mode="word",
     progress_callback=None,
 ):
-    """Create vertical short with face-aware crop and captions."""
     render = _get_render_params(render_profile)
 
     _notify(progress_callback, "Opening clip", 2)
@@ -183,7 +243,6 @@ def create_short(
             txt = txt.set_position(("center", int(out_h * 0.72)))
             caption_layers.append(txt)
         except Exception:
-            # If ImageMagick policy blocks text rendering, continue without captions.
             caption_render_failed = True
             caption_layers = []
             break
@@ -192,11 +251,11 @@ def create_short(
             _notify(progress_callback, "Building captions", 40 + (idx + 1) * 25 / total_caps)
 
     if caption_render_failed:
-        _notify(progress_callback, "Caption engine unavailable, exporting without captions", 68)
+        _notify(progress_callback, "Caption engine fallback enabled", 66)
 
     final = CompositeVideoClip([cropped] + caption_layers, size=(out_w, out_h))
 
-    _notify(progress_callback, "Encoding video", 70)
+    _notify(progress_callback, "Encoding video", 72)
     fps = source.fps or 24
     final.write_videofile(
         output_path,
@@ -212,6 +271,29 @@ def create_short(
 
     source.close()
     final.close()
+
+    if caption_words and caption_mode in ("word", "phrase"):
+        _notify(progress_callback, "Burning hard subtitles", 92)
+        tmp_srt = None
+        tmp_video = None
+        try:
+            fd_srt, tmp_srt = tempfile.mkstemp(suffix=".srt")
+            os.close(fd_srt)
+            _write_srt(caption_words, tmp_srt)
+
+            fd_vid, tmp_video = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd_vid)
+            _burn_subtitles_ffmpeg(output_path, tmp_video, tmp_srt, out_w)
+            if os.path.exists(tmp_video) and os.path.getsize(tmp_video) > 0:
+                os.replace(tmp_video, output_path)
+        except Exception:
+            pass
+        finally:
+            if tmp_srt and os.path.exists(tmp_srt):
+                os.remove(tmp_srt)
+            if tmp_video and os.path.exists(tmp_video):
+                os.remove(tmp_video)
+
     _notify(progress_callback, "Completed", 100)
     return output_path
 

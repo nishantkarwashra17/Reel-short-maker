@@ -27,6 +27,60 @@ def _build_transcript_text(transcript_data, max_chars=30000):
     return text[:max_chars]
 
 
+def _safe_clip(clip, default_start=0.0, default_end=30.0):
+    try:
+        start = float(clip.get("start", default_start))
+        end = float(clip.get("end", default_end))
+    except Exception:
+        start, end = default_start, default_end
+
+    if end <= start:
+        end = start + 20.0
+
+    duration = end - start
+    if duration < 15:
+        end = start + 15
+    elif duration > 70:
+        end = start + 70
+
+    return {
+        "start": round(start, 2),
+        "end": round(end, 2),
+        "reason": str(clip.get("reason", "Strong segment")),
+        "hook": str(clip.get("hook", "Viral moment"))[:120],
+    }
+
+
+def _overlap_seconds(a, b):
+    return max(0.0, min(a["end"], b["end"]) - max(a["start"], b["start"]))
+
+
+def _dedupe_clips(clips, target_count=3, min_gap_sec=8.0):
+    """
+    Keep clips that are not near-duplicates in timeline.
+    """
+    normalized = [_safe_clip(c) for c in clips]
+    normalized.sort(key=lambda c: (c["start"], c["end"]))
+
+    kept = []
+    for clip in normalized:
+        is_duplicate = False
+        for existing in kept:
+            overlap = _overlap_seconds(clip, existing)
+            min_len = max(1.0, min(clip["end"] - clip["start"], existing["end"] - existing["start"]))
+            if overlap / min_len > 0.45:
+                is_duplicate = True
+                break
+            if abs(clip["start"] - existing["start"]) < min_gap_sec:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            kept.append(clip)
+        if len(kept) >= target_count:
+            break
+    return kept
+
+
 def analyze_transcript(transcript_data):
     """
     Uses Gemini AI to identify viral clips from the transcript.
@@ -46,13 +100,14 @@ def analyze_transcript(transcript_data):
 
     text_with_times = _build_transcript_text(transcript_data)
     prompt = f"""You are an expert YouTube and Instagram growth strategist.
-Analyze this transcript and identify the top 3-5 most viral segments for Reels/Shorts.
+Analyze this transcript and identify the top 6 most viral, DISTINCT segments for Reels/Shorts.
 
 Selection criteria:
 1. Strong hook
 2. Self-contained segment
 3. High retention potential
 4. Length between 20 and 60 seconds
+5. Segments must be from different moments, not overlapping repeats
 
 Transcript:
 {text_with_times}
@@ -68,7 +123,7 @@ Return ONLY valid JSON array:
         for clip in clips:
             if "hook" not in clip:
                 clip["hook"] = clip.get("reason", "Viral moment")[:60]
-        return clips
+        return _dedupe_clips(clips, target_count=5)
     except Exception as err:
         print(f"Gemini error: {err}")
         max_end = min(60, transcript_data[-1]["end"]) if transcript_data else 60

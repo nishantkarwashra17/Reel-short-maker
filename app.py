@@ -53,13 +53,13 @@ with st.sidebar:
     quality_label = st.selectbox(
         "Output Quality",
         ["720p (Fast)", "1080p HD (Best)"],
-        index=0,
+        index=1 if runtime_mode == "Google Colab / Cloud" else 0,
     )
 
     speed_mode_label = st.selectbox(
         "Render Speed Mode",
         ["Turbo (Fastest)", "Balanced", "Best Quality"],
-        index=0 if runtime_mode == "Google Colab / Cloud" else 1,
+        index=1 if runtime_mode == "Google Colab / Cloud" else 1,
         help="Turbo is much faster. Best Quality is slower.",
     )
 
