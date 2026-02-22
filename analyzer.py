@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -25,6 +26,17 @@ def _build_transcript_text(transcript_data, max_chars=30000):
         lines.append(f"[{seg['start']:.1f}s - {seg['end']:.1f}s]: {seg['text']}")
     text = "\n".join(lines)
     return text[:max_chars]
+
+
+def _extract_clip_text(transcript_data, start, end):
+    parts = []
+    for seg in transcript_data:
+        if seg["end"] <= start or seg["start"] >= end:
+            continue
+        text = str(seg.get("text", "")).strip()
+        if text:
+            parts.append(text)
+    return " ".join(parts).strip()
 
 
 def _safe_clip(clip, default_start=0.0, default_end=30.0):
@@ -57,6 +69,7 @@ def _safe_clip(clip, default_start=0.0, default_end=30.0):
         "hook": str(clip.get("hook", "Viral moment"))[:120],
         "score": score,
         "format": str(clip.get("format", "both")).lower(),
+        "type": str(clip.get("type", "general")).lower(),
     }
 
 
@@ -91,6 +104,75 @@ def _dedupe_clips(clips, target_count=3, min_gap_sec=8.0):
     return kept
 
 
+def _local_viral_score(text, duration_sec):
+    """
+    Lightweight heuristic score (1-100) to stabilize Gemini quality.
+    """
+    if not text:
+        return 35
+
+    t = text.lower()
+    score = 40
+
+    # Hook patterns (english + hindi cues)
+    hook_terms = [
+        "why",
+        "how",
+        "secret",
+        "mistake",
+        "truth",
+        "shocking",
+        "wait",
+        "stop",
+        "क्यों",
+        "कैसे",
+        "गलती",
+        "सच",
+        "राज",
+        "रुको",
+    ]
+    for term in hook_terms:
+        if term in t:
+            score += 4
+
+    # Curiosity/retention punctuation
+    score += min(t.count("?") * 3, 12)
+    score += min(t.count("!") * 2, 8)
+
+    # Numbers/lists often perform better in short-form
+    if re.search(r"\b\d+\b", t):
+        score += 6
+
+    # Avoid flat/too short text
+    words = t.split()
+    if len(words) < 12:
+        score -= 8
+    elif len(words) > 50:
+        score += 4
+
+    # Duration sweet spot for shorts
+    if 22 <= duration_sec <= 50:
+        score += 10
+    elif duration_sec > 65:
+        score -= 8
+
+    return max(1, min(100, int(score)))
+
+
+def _rerank_candidates(clips, transcript_data):
+    reranked = []
+    for clip in clips:
+        start, end = clip["start"], clip["end"]
+        duration = max(1.0, end - start)
+        clip_text = _extract_clip_text(transcript_data, start, end)
+        local_score = _local_viral_score(clip_text, duration)
+        blended = int(round((0.7 * clip["score"]) + (0.3 * local_score)))
+        clip["score"] = max(1, min(100, blended))
+        reranked.append(clip)
+    reranked.sort(key=lambda c: c["score"], reverse=True)
+    return reranked
+
+
 def analyze_transcript(transcript_data):
     """
     Uses Gemini AI to identify viral clips from the transcript.
@@ -110,7 +192,7 @@ def analyze_transcript(transcript_data):
 
     text_with_times = _build_transcript_text(transcript_data)
     prompt = f"""You are an expert YouTube and Instagram growth strategist.
-Analyze this transcript and identify the top 8 most viral, DISTINCT segments for Reels/Shorts.
+Analyze this transcript and identify the top 10 most viral, DISTINCT segments for Reels/Shorts.
 
 Selection criteria:
 1. Strong hook
@@ -119,14 +201,16 @@ Selection criteria:
 4. Length between 20 and 60 seconds
 5. Segments must be from different moments, not overlapping repeats
 6. Include a score from 1-100 (100 = strongest viral potential)
+7. Prefer moments with clear tension, payoff, conflict, transformation, or highly actionable tips
 
 Transcript:
 {text_with_times}
 
-Return ONLY valid JSON array with keys: start,end,reason,hook,score,format
+Return ONLY valid JSON array with keys: start,end,reason,hook,score,format,type
 format must be one of: "shorts", "reels", "both"
+type must be one of: "story", "tip", "controversy", "emotion", "general"
 [
-  {{"start": 10.5, "end": 45.2, "reason": "why this is viral", "hook": "opening hook", "score": 88, "format": "both"}}
+  {{"start": 10.5, "end": 45.2, "reason": "why this is viral", "hook": "opening hook", "score": 88, "format": "both", "type": "story"}}
 ]"""
 
     try:
@@ -135,7 +219,9 @@ format must be one of: "shorts", "reels", "both"
         for clip in clips:
             if "hook" not in clip:
                 clip["hook"] = clip.get("reason", "Viral moment")[:60]
-        return _dedupe_clips(clips, target_count=5)
+        normalized = [_safe_clip(c) for c in clips]
+        reranked = _rerank_candidates(normalized, transcript_data)
+        return _dedupe_clips(reranked, target_count=5)
     except Exception as err:
         print(f"Gemini error: {err}")
         max_end = min(60, transcript_data[-1]["end"]) if transcript_data else 60
