@@ -119,6 +119,8 @@ def _burn_subtitles_ffmpeg(video_input, video_output, srt_path, out_w):
         "veryfast",
         "-crf",
         "20",
+        "-movflags",
+        "+faststart",
         "-c:a",
         "copy",
         video_output,
@@ -256,7 +258,8 @@ def create_short(
     final = CompositeVideoClip([cropped] + caption_layers, size=(out_w, out_h))
 
     _notify(progress_callback, "Encoding video", 72)
-    fps = source.fps or 24
+    src_fps = source.fps or 24
+    fps = int(min(max(src_fps, 24), 30))
     final.write_videofile(
         output_path,
         codec="libx264",
@@ -266,7 +269,7 @@ def create_short(
         bitrate=render["bitrate"],
         threads=render["threads"],
         logger=None,
-        ffmpeg_params=["-crf", render["crf"]],
+        ffmpeg_params=["-crf", render["crf"], "-movflags", "+faststart"],
     )
 
     source.close()

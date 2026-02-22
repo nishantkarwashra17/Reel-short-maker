@@ -52,6 +52,19 @@ def transcribe_audio(video_path, model_size=None, language="hi", device="auto"):
                         "word": wd.word.strip(),
                     }
                 )
+        else:
+            # Fallback: synthesize word timings if whisper doesn't emit per-word timestamps.
+            raw_text = seg.text.strip()
+            tokens = [token for token in raw_text.split() if token.strip()]
+            seg_start = float(seg.start)
+            seg_end = float(seg.end)
+            seg_dur = max(seg_end - seg_start, 0.1)
+            if tokens:
+                step = seg_dur / len(tokens)
+                for idx, token in enumerate(tokens):
+                    w_start = seg_start + (idx * step)
+                    w_end = min(seg_end, w_start + step)
+                    words.append({"start": w_start, "end": w_end, "word": token})
 
         segments.append(
             {

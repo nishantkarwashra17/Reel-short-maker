@@ -1,4 +1,5 @@
 ﻿import os
+import subprocess
 
 import streamlit as st
 
@@ -6,6 +7,33 @@ from analyzer import analyze_transcript, generate_social_pack
 from downloader import download_video
 from transcriber import transcribe_audio
 from video_engine import create_short
+
+
+
+def _create_preview(input_path, output_path):
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-vf",
+        "scale=-2:960",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "28",
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        output_path,
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 
 st.set_page_config(page_title="AI Reel Short Maker", page_icon="🎬", layout="wide")
 
@@ -63,6 +91,12 @@ with st.sidebar:
         help="Turbo is much faster. Best Quality is slower.",
     )
 
+    caption_density = st.selectbox(
+        "Caption Style",
+        ["Live Word-by-Word", "Phrase (Faster)"],
+        index=0,
+    )
+
     whisper_model = st.selectbox(
         "Whisper Model",
         ["small", "medium", "large-v3"],
@@ -90,7 +124,7 @@ if st.button("Generate Viral Clips", use_container_width=True):
                 "Best Quality": "quality",
             }
             render_profile = speed_map[speed_mode_label]
-            caption_mode = "phrase" if render_profile == "turbo" else "word"
+            caption_mode = "word" if caption_density == "Live Word-by-Word" else "phrase"
 
             global_progress = st.progress(0, text="Starting pipeline...")
             completed_steps = 0
@@ -155,7 +189,13 @@ if st.button("Generate Viral Clips", use_container_width=True):
                             caption_mode=caption_mode,
                             progress_callback=on_clip_progress,
                         )
-                        processed_clips.append((clip, final_path))
+                        preview_path = f"downloads/clip_{i}_preview.mp4"
+                        try:
+                            _create_preview(final_path, preview_path)
+                        except Exception:
+                            preview_path = final_path
+
+                        processed_clips.append((clip, final_path, preview_path))
                         clip_progress.progress(100, text=f"Clip {i}: done")
                     except Exception as clip_error:
                         st.warning(f"Clip {i} failed: {clip_error}")
@@ -172,10 +212,10 @@ if st.button("Generate Viral Clips", use_container_width=True):
 
             if processed_clips:
                 st.header("Generated Clips")
-                for i, (clip_info, clip_path) in enumerate(processed_clips, start=1):
+                for i, (clip_info, clip_path, preview_path) in enumerate(processed_clips, start=1):
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        st.video(clip_path)
+                        st.video(preview_path)
                     with col2:
                         st.subheader(f"Clip {i}")
                         st.write(f"Hook: {clip_info.get('hook', 'N/A')}")
@@ -185,7 +225,7 @@ if st.button("Generate Viral Clips", use_container_width=True):
                         st.write(f"Type: {clip_info.get('type', 'general')}")
                         with open(clip_path, "rb") as file_obj:
                             st.download_button(
-                                label=f"Download Clip {i}",
+                                label=f"Download Clip {i} (HQ)",
                                 data=file_obj,
                                 file_name=f"viral_clip_{i}.mp4",
                                 mime="video/mp4",
