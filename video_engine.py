@@ -162,27 +162,37 @@ def create_short(
 
     caption_layers = []
     total_caps = max(len(caption_words), 1)
+    caption_render_failed = False
     for idx, wd in enumerate(caption_words):
         word_duration = wd["end"] - wd["start"]
         if word_duration <= 0.03 or not wd["word"]:
             continue
 
-        txt = TextClip(
-            wd["word"].upper(),
-            fontsize=68 if out_w >= 1080 else 52,
-            color="yellow",
-            font="Liberation-Sans-Bold",
-            stroke_color="black",
-            stroke_width=3,
-            method="caption",
-            size=(out_w - 80, None),
-        )
-        txt = txt.set_start(wd["start"]).set_duration(word_duration)
-        txt = txt.set_position(("center", int(out_h * 0.72)))
-        caption_layers.append(txt)
+        try:
+            txt = TextClip(
+                wd["word"].upper(),
+                fontsize=68 if out_w >= 1080 else 52,
+                color="yellow",
+                font="Liberation-Sans-Bold",
+                stroke_color="black",
+                stroke_width=3,
+                method="caption",
+                size=(out_w - 80, None),
+            )
+            txt = txt.set_start(wd["start"]).set_duration(word_duration)
+            txt = txt.set_position(("center", int(out_h * 0.72)))
+            caption_layers.append(txt)
+        except Exception:
+            # If ImageMagick policy blocks text rendering, continue without captions.
+            caption_render_failed = True
+            caption_layers = []
+            break
 
         if idx % max(total_caps // 10, 1) == 0:
             _notify(progress_callback, "Building captions", 40 + (idx + 1) * 25 / total_caps)
+
+    if caption_render_failed:
+        _notify(progress_callback, "Caption engine unavailable, exporting without captions", 68)
 
     final = CompositeVideoClip([cropped] + caption_layers, size=(out_w, out_h))
 
