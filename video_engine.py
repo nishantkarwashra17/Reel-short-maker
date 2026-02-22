@@ -10,12 +10,55 @@ def _get_render_params(render_profile):
             "preset": "medium",
             "bitrate": "8000k",
             "crf": "20",
+            "sample_rate": 2.5,
+            "threads": 4,
+        }
+    if render_profile == "balanced":
+        return {
+            "preset": "veryfast",
+            "bitrate": "6000k",
+            "crf": "22",
+            "sample_rate": 1.8,
+            "threads": 4,
         }
     return {
-        "preset": "veryfast",
-        "bitrate": "4500k",
-        "crf": "24",
+        "preset": "ultrafast",
+        "bitrate": "4200k",
+        "crf": "25",
+        "sample_rate": 1.0,
+        "threads": 2,
     }
+
+
+def _notify(progress_callback, stage, pct):
+    if progress_callback:
+        progress_callback(stage, max(0, min(100, int(pct))))
+
+
+def _build_phrase_captions(words, group_size=3):
+    """Merge words into short phrases to reduce TextClip count and speed up rendering."""
+    if not words:
+        return []
+
+    phrases = []
+    bucket = []
+    for wd in words:
+        bucket.append(wd)
+        if len(bucket) >= group_size:
+            phrases.append(bucket)
+            bucket = []
+
+    if bucket:
+        phrases.append(bucket)
+
+    merged = []
+    for chunk in phrases:
+        start = chunk[0]["start"]
+        end = chunk[-1]["end"]
+        text = " ".join(item["word"] for item in chunk).strip()
+        if text:
+            merged.append({"start": start, "end": end, "word": text})
+    return merged
 
 
 def create_short(
@@ -25,9 +68,14 @@ def create_short(
     output_path,
     transcript_words,
     target_resolution=(720, 1280),
-    render_profile="fast",
+    render_profile="turbo",
+    caption_mode="word",
+    progress_callback=None,
 ):
-    """Create vertical short with face-aware crop and word-level captions."""
+    """Create vertical short with face-aware crop and captions."""
+    render = _get_render_params(render_profile)
+
+    _notify(progress_callback, "Opening clip", 2)
     mp_face = mp.solutions.face_detection
     detector = mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
@@ -35,16 +83,15 @@ def create_short(
     src_w, src_h = source.size
     out_w, out_h = target_resolution
 
-    # 9:16 crop width derived from source height.
     crop_w = int(src_h * 9 / 16)
     crop_w = min(crop_w, src_w)
 
     duration = max(source.duration, 0.001)
-    num_samples = max(int(duration * 3), 1)
+    num_samples = max(int(duration * render["sample_rate"]), 1)
     sample_times = np.linspace(0, max(duration - 0.01, 0), num_samples)
 
     centers = []
-    for t in sample_times:
+    for idx, t in enumerate(sample_times):
         frame = source.get_frame(float(t))
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         result = detector.process(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
@@ -55,6 +102,8 @@ def create_short(
             centers.append(float(np.clip(cx, 0.0, 1.0)))
         else:
             centers.append(centers[-1] if centers else 0.5)
+
+        _notify(progress_callback, "Tracking face", 5 + (idx + 1) * 30 / len(sample_times))
 
     detector.close()
 
@@ -71,28 +120,35 @@ def create_short(
         crop = frame[:, x1 : x1 + crop_w]
         return cv2.resize(crop, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
 
+    _notify(progress_callback, "Cropping vertical frame", 38)
     cropped = source.fl(crop_at_time)
 
-    # Word timestamps are absolute timeline values, convert to local clip offsets.
-    caption_layers = []
+    caption_words = []
     for wd in transcript_words:
         if wd.get("start") is None or wd.get("end") is None:
             continue
         if wd["end"] <= start_time or wd["start"] >= end_time:
             continue
+        caption_words.append(
+            {
+                "start": max(float(wd["start"]) - start_time, 0.0),
+                "end": min(float(wd["end"]) - start_time, duration),
+                "word": str(wd.get("word", "")).strip(),
+            }
+        )
 
-        local_start = max(float(wd["start"]) - start_time, 0.0)
-        local_end = min(float(wd["end"]) - start_time, duration)
-        word_duration = local_end - local_start
-        if word_duration <= 0.03:
-            continue
+    if caption_mode == "phrase":
+        caption_words = _build_phrase_captions(caption_words, group_size=3)
 
-        word_text = str(wd.get("word", "")).strip()
-        if not word_text:
+    caption_layers = []
+    total_caps = max(len(caption_words), 1)
+    for idx, wd in enumerate(caption_words):
+        word_duration = wd["end"] - wd["start"]
+        if word_duration <= 0.03 or not wd["word"]:
             continue
 
         txt = TextClip(
-            word_text.upper(),
+            wd["word"].upper(),
             fontsize=68 if out_w >= 1080 else 52,
             color="yellow",
             font="Liberation-Sans-Bold",
@@ -101,13 +157,16 @@ def create_short(
             method="caption",
             size=(out_w - 80, None),
         )
-        txt = txt.set_start(local_start).set_duration(word_duration)
+        txt = txt.set_start(wd["start"]).set_duration(word_duration)
         txt = txt.set_position(("center", int(out_h * 0.72)))
         caption_layers.append(txt)
 
+        if idx % max(total_caps // 10, 1) == 0:
+            _notify(progress_callback, "Building captions", 40 + (idx + 1) * 25 / total_caps)
+
     final = CompositeVideoClip([cropped] + caption_layers, size=(out_w, out_h))
 
-    render = _get_render_params(render_profile)
+    _notify(progress_callback, "Encoding video", 70)
     fps = source.fps or 24
     final.write_videofile(
         output_path,
@@ -116,13 +175,14 @@ def create_short(
         fps=fps,
         preset=render["preset"],
         bitrate=render["bitrate"],
-        threads=0,
+        threads=render["threads"],
         logger=None,
         ffmpeg_params=["-crf", render["crf"]],
     )
 
     source.close()
     final.close()
+    _notify(progress_callback, "Completed", 100)
     return output_path
 
 

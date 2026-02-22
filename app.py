@@ -38,22 +38,31 @@ with st.sidebar:
     runtime_mode = st.selectbox(
         "Runtime",
         ["Local PC", "Google Colab / Cloud"],
-        index=0,
-        help="Cloud mode uses heavier AI defaults and is better for low-power PCs.",
+        index=1,
+        help="Cloud mode is recommended for low-power PCs.",
     )
 
     quality_label = st.selectbox(
         "Output Quality",
         ["720p (Fast)", "1080p HD (Best)"],
-        index=1 if runtime_mode == "Google Colab / Cloud" else 0,
+        index=0,
+    )
+
+    speed_mode_label = st.selectbox(
+        "Render Speed Mode",
+        ["Turbo (Fastest)", "Balanced", "Best Quality"],
+        index=0 if runtime_mode == "Google Colab / Cloud" else 1,
+        help="Turbo is much faster. Best Quality is slower.",
     )
 
     whisper_model = st.selectbox(
         "Whisper Model",
         ["small", "medium", "large-v3"],
         index=1 if runtime_mode == "Google Colab / Cloud" else 0,
-        help="Use medium/large-v3 in Colab GPU mode for better accuracy.",
+        help="medium is usually the best speed/quality mix on Colab GPU.",
     )
+
+    max_clips = st.slider("Max Clips", min_value=1, max_value=5, value=3)
 
 youtube_url = st.text_input(
     "YouTube Video URL", placeholder="https://www.youtube.com/watch?v=..."
@@ -66,11 +75,23 @@ if st.button("Generate Viral Clips", use_container_width=True):
         try:
             is_hd = quality_label.startswith("1080p")
             target_resolution = (1080, 1920) if is_hd else (720, 1280)
-            render_profile = "quality" if is_hd else "fast"
+
+            speed_map = {
+                "Turbo (Fastest)": "turbo",
+                "Balanced": "balanced",
+                "Best Quality": "quality",
+            }
+            render_profile = speed_map[speed_mode_label]
+            caption_mode = "phrase" if render_profile == "turbo" else "word"
+
+            global_progress = st.progress(0, text="Starting pipeline...")
+            completed_steps = 0
 
             with st.status("Processing video...", expanded=True) as status:
                 st.write("Downloading source video...")
                 video_path = download_video(youtube_url, prefer_1080=is_hd)
+                completed_steps += 1
+                global_progress.progress(10, text="Video downloaded")
                 st.write(f"Downloaded: `{video_path}`")
 
                 st.write("Transcribing with faster-whisper...")
@@ -80,11 +101,16 @@ if st.button("Generate Viral Clips", use_container_width=True):
                     language="hi",
                     device="auto",
                 )
+                completed_steps += 1
+                global_progress.progress(25, text="Transcription complete")
                 st.write(f"Transcribed {len(transcript)} segments.")
 
                 st.write("Selecting viral segments with Gemini...")
                 viral_clips = analyze_transcript(transcript)
-                st.write(f"Found {len(viral_clips)} candidate clips.")
+                viral_clips = viral_clips[:max_clips]
+                completed_steps += 1
+                global_progress.progress(35, text="Clip selection complete")
+                st.write(f"Selected {len(viral_clips)} clips.")
 
                 all_words = []
                 for seg in transcript:
@@ -92,9 +118,17 @@ if st.button("Generate Viral Clips", use_container_width=True):
 
                 os.makedirs("downloads", exist_ok=True)
                 processed_clips = []
+
+                total_steps = max(1, 3 + len(viral_clips))
                 for i, clip in enumerate(viral_clips, start=1):
                     hook_text = clip.get("hook", f"Clip {i}")
                     st.write(f"Rendering clip {i}: {hook_text}")
+
+                    clip_progress = st.progress(0, text=f"Clip {i}: starting")
+
+                    def on_clip_progress(stage, pct):
+                        clip_progress.progress(int(pct), text=f"Clip {i}: {stage}")
+
                     output_name = f"downloads/clip_{i}.mp4"
                     try:
                         final_path = create_short(
@@ -105,11 +139,19 @@ if st.button("Generate Viral Clips", use_container_width=True):
                             transcript_words=all_words,
                             target_resolution=target_resolution,
                             render_profile=render_profile,
+                            caption_mode=caption_mode,
+                            progress_callback=on_clip_progress,
                         )
                         processed_clips.append((clip, final_path))
+                        clip_progress.progress(100, text=f"Clip {i}: done")
                     except Exception as clip_error:
                         st.warning(f"Clip {i} failed: {clip_error}")
 
+                    completed_steps += 1
+                    pct = int((completed_steps / total_steps) * 100)
+                    global_progress.progress(min(pct, 99), text=f"Overall progress: {min(pct, 99)}%")
+
+                global_progress.progress(100, text="All done")
                 status.update(
                     label=f"Completed: {len(processed_clips)} clips generated.",
                     state="complete",
