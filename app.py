@@ -27,13 +27,21 @@ st.caption("Paste a YouTube link and generate vertical clips with AI captions.")
 
 with st.sidebar:
     st.header("Settings")
-    gemini_key = st.text_input(
-        "Gemini API Key",
-        type="password",
-        help="Get one from https://aistudio.google.com",
-    )
-    if gemini_key:
-        os.environ["GOOGLE_API_KEY"] = gemini_key
+    existing_key = os.getenv("GOOGLE_API_KEY", "").strip()
+    if existing_key:
+        st.success("Gemini key loaded from server secret.")
+        use_manual_key = st.checkbox("Override Gemini key manually", value=False)
+    else:
+        use_manual_key = True
+
+    if use_manual_key:
+        gemini_key = st.text_input(
+            "Gemini API Key",
+            type="password",
+            help="Get one from https://aistudio.google.com",
+        )
+        if gemini_key:
+            os.environ["GOOGLE_API_KEY"] = gemini_key
 
     runtime_mode = st.selectbox(
         "Runtime",
