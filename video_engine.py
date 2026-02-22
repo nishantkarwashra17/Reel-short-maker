@@ -1,7 +1,11 @@
 ﻿import cv2
-import mediapipe as mp
 import numpy as np
 from moviepy.editor import CompositeVideoClip, TextClip, VideoFileClip
+
+try:
+    import mediapipe as mp
+except Exception:
+    mp = None
 
 
 def _get_render_params(render_profile):
@@ -76,8 +80,18 @@ def create_short(
     render = _get_render_params(render_profile)
 
     _notify(progress_callback, "Opening clip", 2)
-    mp_face = mp.solutions.face_detection
-    detector = mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+
+    detector = None
+    mediapipe_ready = bool(mp and getattr(mp, "solutions", None))
+    if mediapipe_ready:
+        try:
+            mp_face = mp.solutions.face_detection
+            detector = mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+        except Exception:
+            detector = None
+            _notify(progress_callback, "MediaPipe init failed, using center crop", 5)
+    else:
+        _notify(progress_callback, "MediaPipe unavailable, using center crop", 5)
 
     source = VideoFileClip(video_path).subclip(start_time, end_time)
     src_w, src_h = source.size
@@ -92,20 +106,26 @@ def create_short(
 
     centers = []
     for idx, t in enumerate(sample_times):
-        frame = source.get_frame(float(t))
-        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        result = detector.process(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        result = None
+        if detector is not None:
+            frame = source.get_frame(float(t))
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            result = detector.process(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
 
-        if result.detections:
-            bbox = result.detections[0].location_data.relative_bounding_box
-            cx = bbox.xmin + bbox.width / 2
-            centers.append(float(np.clip(cx, 0.0, 1.0)))
+        if result is not None and result.detections:
+            try:
+                bbox = result.detections[0].location_data.relative_bounding_box
+                cx = bbox.xmin + bbox.width / 2
+                centers.append(float(np.clip(cx, 0.0, 1.0)))
+            except Exception:
+                centers.append(centers[-1] if centers else 0.5)
         else:
             centers.append(centers[-1] if centers else 0.5)
 
         _notify(progress_callback, "Tracking face", 5 + (idx + 1) * 30 / len(sample_times))
 
-    detector.close()
+    if detector is not None:
+        detector.close()
 
     if len(centers) > 2:
         kernel = np.ones(min(7, len(centers)), dtype=np.float32)
