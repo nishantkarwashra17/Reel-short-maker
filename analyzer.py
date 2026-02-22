@@ -43,11 +43,20 @@ def _safe_clip(clip, default_start=0.0, default_end=30.0):
     elif duration > 70:
         end = start + 70
 
+    score_raw = clip.get("score", clip.get("viral_score", 50))
+    try:
+        score = int(round(float(score_raw)))
+    except Exception:
+        score = 50
+    score = max(1, min(100, score))
+
     return {
         "start": round(start, 2),
         "end": round(end, 2),
         "reason": str(clip.get("reason", "Strong segment")),
         "hook": str(clip.get("hook", "Viral moment"))[:120],
+        "score": score,
+        "format": str(clip.get("format", "both")).lower(),
     }
 
 
@@ -60,7 +69,7 @@ def _dedupe_clips(clips, target_count=3, min_gap_sec=8.0):
     Keep clips that are not near-duplicates in timeline.
     """
     normalized = [_safe_clip(c) for c in clips]
-    normalized.sort(key=lambda c: (c["start"], c["end"]))
+    normalized.sort(key=lambda c: c["score"], reverse=True)
 
     kept = []
     for clip in normalized:
@@ -78,6 +87,7 @@ def _dedupe_clips(clips, target_count=3, min_gap_sec=8.0):
             kept.append(clip)
         if len(kept) >= target_count:
             break
+    kept.sort(key=lambda c: c["start"])
     return kept
 
 
@@ -100,7 +110,7 @@ def analyze_transcript(transcript_data):
 
     text_with_times = _build_transcript_text(transcript_data)
     prompt = f"""You are an expert YouTube and Instagram growth strategist.
-Analyze this transcript and identify the top 6 most viral, DISTINCT segments for Reels/Shorts.
+Analyze this transcript and identify the top 8 most viral, DISTINCT segments for Reels/Shorts.
 
 Selection criteria:
 1. Strong hook
@@ -108,13 +118,15 @@ Selection criteria:
 3. High retention potential
 4. Length between 20 and 60 seconds
 5. Segments must be from different moments, not overlapping repeats
+6. Include a score from 1-100 (100 = strongest viral potential)
 
 Transcript:
 {text_with_times}
 
-Return ONLY valid JSON array:
+Return ONLY valid JSON array with keys: start,end,reason,hook,score,format
+format must be one of: "shorts", "reels", "both"
 [
-  {{"start": 10.5, "end": 45.2, "reason": "why this is viral", "hook": "opening hook"}}
+  {{"start": 10.5, "end": 45.2, "reason": "why this is viral", "hook": "opening hook", "score": 88, "format": "both"}}
 ]"""
 
     try:

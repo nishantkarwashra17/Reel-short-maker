@@ -180,6 +180,8 @@ if st.button("Generate Viral Clips", use_container_width=True):
                         st.subheader(f"Clip {i}")
                         st.write(f"Hook: {clip_info.get('hook', 'N/A')}")
                         st.write(f"Reason: {clip_info.get('reason', 'N/A')}")
+                        st.write(f"Viral score: {clip_info.get('score', 'N/A')}/100")
+                        st.write(f"Best for: {clip_info.get('format', 'both')}")
                         with open(clip_path, "rb") as file_obj:
                             st.download_button(
                                 label=f"Download Clip {i}",
